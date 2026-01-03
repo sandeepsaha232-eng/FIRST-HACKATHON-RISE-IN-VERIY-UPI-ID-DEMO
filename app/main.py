@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, UploadFile
+from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -7,14 +8,24 @@ from typing import List
 from . import models, schemas
 from .core import database
 from .services.flare_service import flare_service, trust_oracle_service
+from .services.flare_service import flare_service, trust_oracle_service
+from .services.ocr_service import ocr_service
+from .services.upi_validation_service import upi_validation_service
 from . import auth
 import random
 from datetime import datetime
 
-# Create database tables
-models.Base.metadata.create_all(bind=database.engine)
+# Lifespan context manager for startup/shutdown events
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    try:
+        models.Base.metadata.create_all(bind=database.engine)
+        print("✅ Database tables created successfully")
+    except Exception as e:
+        print(f"⚠️ Database initialization failed: {str(e)}")
+    yield
 
-app = FastAPI(title="Flare Trust Engine", version="2.0")
+app = FastAPI(title="Flare Trust Engine", version="2.0", lifespan=lifespan)
 
 # CORS Configuration - EXPLICITLY ALLOW ALL FOR DEBUGGING
 app.add_middleware(
@@ -168,6 +179,69 @@ async def upload_receipt(
     db.commit()
     
     return result
+
+@app.post("/api/analyze-image")
+async def analyze_image(
+    file: UploadFile,
+    db: Session = Depends(get_db)
+):
+    """
+    Analyzes an uploaded image to extract UPI ID (VPA).
+    First tries QR Code decoding.
+    If that fails, falls back to OCR.
+    """
+    contents = await file.read()
+    result = ocr_service.extract_upi_id(contents)
+    
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+        
+    if not result.get("upi_id") and result.get("method") != "FAILED":
+         # If no error but no ID found (and not explicitly failed method which has raw_text)
+         pass
+
+    return result
+
+@app.post("/api/verify-upi")
+async def verify_upi(
+    payload: dict,
+    db: Session = Depends(get_db)
+):
+    """
+    Step 2 & 3: Validates the UPI ID and requests Flare Attestation.
+    Input: { "upi_id": "example@bank" }
+    """
+    upi_id = payload.get("upi_id")
+    if not upi_id:
+        raise HTTPException(status_code=400, detail="UPI ID is required")
+
+    # 1. Validation (Step 2D)
+    validation_result = await upi_validation_service.validate_upi_id(upi_id)
+    
+    # 2. Flare FDC Attestation (Step 3)
+    attestation = await flare_service.attest_upi_verification(validation_result)
+    
+    # 3. Persistence
+    # Create a record of this verification. Using ExpenseProof for now (or a new model).
+    # Since we don't have a transaction hash/amount from image yet, we store mock values.
+    
+    new_proof = models.ExpenseProof(
+        user_id=1, # Mock User
+        tx_hash=attestation.get("proof") or "0xFAILED",
+        chain_id="FLR",
+        amount_wei="0",
+        metadata_info=f"UPI Verification: {upi_id} - {validation_result['status_message']}",
+        status=models.VerificationStatus.VERIFIED if attestation['attestation_status'] == "VERIFIED" else models.VerificationStatus.FAILED,
+        verified_at=datetime.utcnow()
+    )
+    db.add(new_proof)
+    db.commit()
+
+    return {
+        "validation": validation_result,
+        "attestation": attestation,
+        "record_id": new_proof.id
+    }
 
 @app.get("/api/status/{proof_id}", response_model=schemas.ProofResponse)
 def get_proof_status(proof_id: int, db: Session = Depends(get_db)):

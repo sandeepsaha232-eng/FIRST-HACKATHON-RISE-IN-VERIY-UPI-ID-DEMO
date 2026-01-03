@@ -60,4 +60,39 @@ contract TrustOracle {
         VerificationResult memory res = finalResults[txId];
         return (res.isValid, res.timestamp, res.voteCount);
     }
+
+    // --------------------------------------------------------
+    // FLARE FDC INTEGRATION
+    // --------------------------------------------------------
+
+    // Mock Interface for FdcVerification
+    // In production: import "@flarenetwork/flare-periphery-contracts/coston2/IFdcVerification.sol";
+    function verifyFdcProof(bytes32[] calldata merkleProof, bytes32 root) internal pure returns (bool) {
+         // This is where we would call: IPaymentVerification(fdcAddr).verifyPayment(proof);
+         // For demo, we assume if the root is non-zero, it's valid.
+         return root != bytes32(0);
+    }
+
+    /**
+     * @dev Consumes a Merkle Proof from the FDC to verify a UPI ID.
+     * @param upiId The UPI ID (used as key).
+     * @param merkleRoot The root returned by the FDC.
+     */
+    function verifyUpiProof(string calldata upiId, bytes32 merkleRoot) external {
+        require(merkleRoot != bytes32(0), "Invalid Merkle Root");
+
+        // 1. Verify the Proof against the FDC Contract (Simulated)
+        bool isProofValid = verifyFdcProof(new bytes32[](0), merkleRoot);
+        require(isProofValid, "FDC Proof Verification Failed");
+
+        // 2. Store the Verified Result
+        finalResults[upiId] = VerificationResult({
+            isValid: true,
+            timestamp: block.timestamp,
+            voteCount: 100, // Weighted vote from FDC
+            decided: true
+        });
+
+        emit TruthDecided(upiId, true, block.timestamp);
+    }
 }

@@ -16,8 +16,7 @@ const Header = ({ onAuthClick, isAuthenticated, user, onNavigate }) => {
         <header className="fixed top-0 left-0 right-0 z-50 bg-background/90 backdrop-blur-md border-b border-slate-700 h-16 flex items-center justify-between px-6">
             {/* Left: Logo */}
             <button onClick={() => onNavigate('home')} className="flex items-center gap-2 group">
-                <Shield className="text-primary w-8 h-8 group-hover:rotate-12 transition-transform" />
-                <span className="text-white font-bold text-xl tracking-wider">EXPENSESHIELD</span>
+                <img src="/logo.jpg" alt="Logo" className="h-16 w-auto object-contain" />
             </button>
 
             {/* Center: Navigation */}

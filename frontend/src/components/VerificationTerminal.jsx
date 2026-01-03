@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 const steps = [
     { title: "Analyzing Receipt via OCR", icon: <Fingerprint className="w-4 h-4" /> },
-    { title: "Consulting Multi-Source APIs", icon: <Activity className="w-4 h-4" /> },
+    { title: "Verifying VPA Integrity", icon: <Activity className="w-4 h-4" /> },
     { title: "Submitting to Flare Oracle", icon: <Shield className="w-4 h-4" /> }
 ];
 
@@ -14,6 +14,8 @@ export default function VerificationTerminal({ onStatusChange }) {
     const [status, setStatus] = useState('upload'); // upload, processing, verified
     const [currentStep, setCurrentStep] = useState(0);
     const [result, setResult] = useState(null);
+    const [errorMsg, setErrorMsg] = useState(null);
+    const [manualId, setManualId] = useState("");
 
     const handleFileChange = (e) => {
         if (e.target.files && e.target.files[0]) {
@@ -22,64 +24,81 @@ export default function VerificationTerminal({ onStatusChange }) {
         }
     };
 
-    const startVerification = async (selectedFile) => {
+    const handleManualVerify = () => {
+        if (!manualId) return;
+        // Skip analysis, go straight to verify
+        startVerification(null, manualId);
+    };
+
+    const startVerification = async (selectedFile, manualUpiId = null) => {
         setStatus('processing');
         onStatusChange('verifying_on_chain');
-
-        // Step 1: Upload & OCR (Client-Side)
+        setErrorMsg(null);
         setCurrentStep(0);
 
         try {
-            // Import dynamically to avoid SSR issues if any
-            const Tesseract = (await import('tesseract.js')).default;
+            let upiId = manualUpiId;
+            let method = "MANUAL";
 
-            console.log("Starting OCR...");
-            const { data: { text } } = await Tesseract.recognize(
-                selectedFile,
-                'eng',
-                { logger: m => console.log(m) }
-            );
+            // Step 1: Analysis (if file provided)
+            if (selectedFile) {
+                console.log("Starting Analysis...");
+                const formData = new FormData();
+                formData.append('file', selectedFile);
 
-            console.log("Extracted Text:", text);
-            // Simulate extracting specific fields
-            const extractedData = {
-                date: text.match(/\d{4}-\d{2}-\d{2}/)?.[0] || new Date().toISOString().split('T')[0],
-                amount: text.match(/\$\d+(\.\d{2})?/)?.[0] || "$0.00",
-                txId: text.match(/TX-[A-Z0-9]+/)?.[0] || `TX-${Math.random().toString(36).substr(2, 9).toUpperCase()}`
-            };
+                const analysis = await api.analyzeImage(formData);
+                console.log("Analysis Result:", analysis);
 
-            // Step 2: Multi-Source
+                if (!analysis.upi_id) {
+                    throw new Error("Could not extract UPI ID from image. Please try again or use manual entry.");
+                }
+                upiId = analysis.upi_id;
+                method = analysis.method;
+            } else {
+                // Manual Flow - Skip Step 0 visual delay
+                setCurrentStep(1);
+            }
+
+            // Step 2: Verification
             setCurrentStep(1);
-            await new Promise(r => setTimeout(r, 1500));
+            // Small delay for UX if it was instant
+            if (selectedFile) await new Promise(r => setTimeout(r, 1000));
 
-            // Step 3: Oracle Submission
+            console.log("Verifying UPI:", upiId);
+            const verifyResult = await api.verifyUpi(upiId);
+            console.log("Verify Result:", verifyResult);
+
+            if (!verifyResult.validation.is_active) {
+                throw new Error(verifyResult.validation.status_message || "UPI ID is invalid");
+            }
+
+            // Step 3: Oracle Submission (Attestation)
             setCurrentStep(2);
+            await new Promise(r => setTimeout(r, 1500)); // UX Delay for Oracle simulation
 
-            /* DEMO MODE: Bypass Backend
-            const formData = new FormData();
-            formData.append('file', selectedFile);
-            formData.append('ocr_data', JSON.stringify(extractedData)); // Send OCR data to backend
+            const attestation = verifyResult.attestation;
+            if (attestation.attestation_status !== "VERIFIED") {
+                throw new Error("Flare FDC Attestation Failed");
+            }
 
-            const data = await api.uploadReceipt(formData);
-            */
-
-            // FAKE SUCCESS
-            await new Promise(r => setTimeout(r, 2000)); // Simulate network
-
+            // Success Data Construction
             const data = {
-                tx_id: extractedData.txId,
+                tx_id: attestation.proof, // Merkle Root as ID
                 is_valid: true,
-                timestamp: new Date().toISOString(),
-                vote_count: 5 // Fake consensus
+                timestamp: attestation.timestamp,
+                vote_count: attestation.attestation_round, // Using round as vote count proxy
+                upi_id: upiId,
+                registered_name: verifyResult.validation.registered_name
             };
 
-            setResult({ ...data, ...extractedData }); // Merge backend result with OCR data for display
+            setResult(data);
             setStatus('verified');
             onStatusChange('verified');
 
         } catch (e) {
             console.error(e);
-            setStatus('upload');
+            setErrorMsg(e.message || "Verification Failed");
+            setStatus('upload'); // Go back to upload but show error
             onStatusChange('failed');
         }
     };
@@ -110,51 +129,63 @@ export default function VerificationTerminal({ onStatusChange }) {
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
                             exit={{ opacity: 0 }}
-                            className="grid grid-cols-1 md:grid-cols-2 gap-6"
+                            className="space-y-6"
                         >
-                            {/* LEFT: Manual Verification */}
-                            <div className="bg-white/5 border border-white/10 rounded-xl p-6 flex flex-col justify-center space-y-4">
-                                <div>
-                                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                                        <LinkIcon className="w-4 h-4 text-cyan-400" /> Manual Verification
-                                    </h3>
-                                    <p className="text-xs text-slate-400 mt-1">Verify existing chain transactions</p>
+                            {errorMsg && (
+                                <div className="p-3 bg-red-500/10 border border-red-500/50 rounded-lg text-red-400 text-xs font-mono text-center">
+                                    ❌ {errorMsg}
                                 </div>
+                            )}
 
-                                <div className="space-y-3">
-                                    <div className="space-y-1">
-                                        <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Transaction Hash / UPI ID</label>
-                                        <input
-                                            type="text"
-                                            placeholder="0x... or UPI-REF-..."
-                                            className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-cyan-500 transition-colors"
-                                        />
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                {/* LEFT: Manual Verification */}
+                                <div className="bg-white/5 border border-white/10 rounded-xl p-6 flex flex-col justify-center space-y-4">
+                                    <div>
+                                        <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                                            <LinkIcon className="w-4 h-4 text-cyan-400" /> Manual Verification
+                                        </h3>
+                                        <p className="text-xs text-slate-400 mt-1">Verify existing chain transactions</p>
                                     </div>
-                                    <button
-                                        onClick={() => startVerification({ name: "Manual Entry" })}
-                                        className="w-full bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 font-bold text-sm py-2 rounded-lg transition-all"
-                                    >
-                                        Verify ID
-                                    </button>
-                                </div>
-                            </div>
 
-                            {/* RIGHT: Upload Verification */}
-                            <div className="group relative border-2 border-dashed border-white/10 rounded-xl p-6 text-center transition-all hover:border-cyan-500/50 hover:bg-cyan-500/5 flex flex-col items-center justify-center">
-                                <input
-                                    type="file"
-                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"
-                                    onChange={handleFileChange}
-                                    accept="image/*,.pdf"
-                                />
-                                <div className="p-3 bg-slate-800 rounded-full group-hover:scale-110 transition-transform shadow-xl mb-3">
-                                    <UploadCloud className="w-6 h-6 text-cyan-400" />
+                                    <div className="space-y-3">
+                                        <div className="space-y-1">
+                                            <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">UPI ID / VPA</label>
+                                            <input
+                                                type="text"
+                                                value={manualId}
+                                                onChange={(e) => setManualId(e.target.value)}
+                                                placeholder="example@bank"
+                                                className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-cyan-500 transition-colors"
+                                            />
+                                        </div>
+                                        <button
+                                            onClick={handleManualVerify}
+                                            disabled={!manualId}
+                                            className={`w-full font-bold text-sm py-2 rounded-lg transition-all ${manualId ? 'bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' : 'bg-slate-700/20 text-slate-500 border border-transparent cursor-not-allowed'
+                                                }`}
+                                        >
+                                            Verify ID
+                                        </button>
+                                    </div>
                                 </div>
-                                <h3 className="text-lg font-bold text-white">Upload Receipt</h3>
-                                <p className="text-slate-400 text-xs mt-1 mb-2">Drag & Drop Evidence</p>
-                                <span className="text-[10px] uppercase tracking-widest text-slate-500 font-mono border px-2 py-1 rounded border-slate-700">
-                                    JPG, PNG, PDF
-                                </span>
+
+                                {/* RIGHT: Upload Verification */}
+                                <div className="group relative border-2 border-dashed border-white/10 rounded-xl p-6 text-center transition-all hover:border-cyan-500/50 hover:bg-cyan-500/5 flex flex-col items-center justify-center">
+                                    <input
+                                        type="file"
+                                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"
+                                        onChange={handleFileChange}
+                                        accept="image/*,.pdf"
+                                    />
+                                    <div className="p-3 bg-slate-800 rounded-full group-hover:scale-110 transition-transform shadow-xl mb-3">
+                                        <UploadCloud className="w-6 h-6 text-cyan-400" />
+                                    </div>
+                                    <h3 className="text-lg font-bold text-white">Upload Receipt/QR</h3>
+                                    <p className="text-slate-400 text-xs mt-1 mb-2">Drag & Drop Evidence</p>
+                                    <span className="text-[10px] uppercase tracking-widest text-slate-500 font-mono border px-2 py-1 rounded border-slate-700">
+                                        JPG, PNG
+                                    </span>
+                                </div>
                             </div>
                         </motion.div>
                     )}
@@ -206,24 +237,27 @@ export default function VerificationTerminal({ onStatusChange }) {
 
                                 <h2 className="text-2xl font-bold text-white mb-2">Immutable Proof Certificate</h2>
                                 <p className="text-slate-400 text-sm mb-6 max-w-md mx-auto">
-                                    The Flare Trust Oracle has aggregated votes from multiple independent sources and verified this expense as TRUTH.
+                                    The Flare Trust Oracle has verified the VPA <strong>{result.upi_id}</strong> (Owner: {result.registered_name}) as VALID.
                                 </p>
 
                                 <div className="grid grid-cols-2 gap-4 text-left max-w-sm mx-auto mb-8">
                                     <div className="bg-black/20 p-3 rounded-lg">
-                                        <p className="text-[10px] uppercase text-slate-500 font-bold mb-1">Transaction ID</p>
-                                        <p className="text-xs text-cyan-400 font-mono break-all">{result.tx_id}</p>
+                                        <p className="text-[10px] uppercase text-slate-500 font-bold mb-1">Merkle Proof Root</p>
+                                        <p className="text-xs text-cyan-400 font-mono break-all">{result.tx_id.substring(0, 16)}...</p>
                                     </div>
                                     <div className="bg-black/20 p-3 rounded-lg">
-                                        <p className="text-[10px] uppercase text-slate-500 font-bold mb-1">Oracle Consensus</p>
+                                        <p className="text-[10px] uppercase text-slate-500 font-bold mb-1">FDC Consensus</p>
                                         <p className="text-xs text-green-400 font-mono font-bold">
-                                            {result.vote_count}/{result.vote_count} VOTES (100%)
+                                            ROUND #{result.vote_count}
                                         </p>
                                     </div>
                                 </div>
 
                                 <button
-                                    onClick={() => setStatus('upload')}
+                                    onClick={() => {
+                                        setStatus('upload');
+                                        setManualId("");
+                                    }}
                                     className="text-sm text-slate-500 hover:text-white underline transition-colors"
                                 >
                                     Verify Another Receipt

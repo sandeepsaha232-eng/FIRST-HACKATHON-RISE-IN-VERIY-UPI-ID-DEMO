@@ -9,7 +9,6 @@ import AboutSection from './components/AboutSection';
 import ReasonSection from './components/ReasonSection';
 import SupportSection from './components/SupportSection';
 import Footer from './components/Footer';
-
 function App() {
     const [isAuthenticated, setIsAuthenticated] = useState(() => {
         return !!localStorage.getItem('token');
@@ -82,7 +81,9 @@ function App() {
                             <History user={user} />
                         </div>
 
-                        {/* 2. Verification Terminal */}
+
+
+                        {/* 3. Verification Terminal */}
                         <div className="pb-20">
                             <h2 className="text-2xl font-bold text-white mb-6 text-center">New Expense Verification</h2>
                             <VerificationTerminal
@@ -116,6 +117,7 @@ function App() {
                             </div>
                         </div>
                     </div>
+
                 )}
 
                 {/* Common Info Sections (Visible to All) */}
@@ -125,23 +127,25 @@ function App() {
             </div>
 
             {/* Secondary Logout (Authenticated Only) */}
-            {isAuthenticated && (
-                <div className="max-w-7xl mx-auto px-6 mb-8 flex justify-end">
-                    <button
-                        onClick={() => {
-                            localStorage.removeItem('token');
-                            localStorage.removeItem('user');
-                            window.location.href = '/';
-                        }}
-                        className="text-slate-500 hover:text-red-400 text-sm font-medium flex items-center gap-2 transition-colors"
-                    >
-                        Sign Out From Device →
-                    </button>
-                </div>
-            )}
+            {
+                isAuthenticated && (
+                    <div className="max-w-7xl mx-auto px-6 mb-8 flex justify-end">
+                        <button
+                            onClick={() => {
+                                localStorage.removeItem('token');
+                                localStorage.removeItem('user');
+                                window.location.href = '/';
+                            }}
+                            className="text-slate-500 hover:text-red-400 text-sm font-medium flex items-center gap-2 transition-colors"
+                        >
+                            Sign Out From Device →
+                        </button>
+                    </div>
+                )
+            }
 
             <Footer />
-        </div>
+        </div >
     );
 }
 

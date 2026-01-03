@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Lock, User, Mail, Phone, Calendar, ArrowRight, ShieldCheck } from 'lucide-react';
-import axios from 'axios';
-import { API_BASE_URL } from '../services/api';
+import { authService } from '../services/auth';
+
 
 const AuthModal = ({ isOpen, onClose, onLoginSuccess }) => {
     const [isLogin, setIsLogin] = useState(false);
@@ -27,36 +27,23 @@ const AuthModal = ({ isOpen, onClose, onLoginSuccess }) => {
         setLoading(true);
         setError('');
 
-        const endpoint = isLogin ? '/auth/login' : '/auth/register';
-        const payload = isLogin
-            ? { email: formData.email, password: formData.password }
-            : { ...formData, dob: new Date(formData.dob).toISOString() };
-
         try {
-            // DEMO MODE: Bypass Backend
-            // const res = await axios.post(`${API_BASE_URL}${endpoint}`, payload, { timeout: 5000 });
+            let user;
+            if (isLogin) {
+                user = await authService.login(formData.email, formData.password);
+            } else {
+                user = await authService.register(formData);
+            }
 
-            // FAKE SUCCESS
-            const demoUser = {
-                id: 1,
-                name: formData.full_name || 'Sandeep',
-                email: formData.email,
-                wallet_address: '0xDemoWallet123',
-                token: 'demo-token-123'
-            };
+            console.log("Auth Success:", user);
+            alert(isLogin ? "Login Successful" : "Registration Successful");
 
-            console.log("Auth Success (Demo Mode):", demoUser);
-
-            localStorage.setItem('token', demoUser.token);
-            localStorage.setItem('user', JSON.stringify(demoUser));
-            alert("Login Successful (Demo Mode)");
-
-            onLoginSuccess(demoUser);
+            onLoginSuccess(user);
             onClose();
 
         } catch (err) {
             console.error(err);
-            setError("Demo Login Failed (Should not happen)");
+            setError(isLogin ? "Login Failed" : "Registration Failed. Please try again.");
         } finally {
             setLoading(false);
         }

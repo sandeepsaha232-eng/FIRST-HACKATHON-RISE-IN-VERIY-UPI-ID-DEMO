@@ -43,5 +43,27 @@ export const api = {
             console.error("Upload Error:", error);
             throw error;
         }
+    },
+
+    analyzeImage: async (formData) => {
+        try {
+            const response = await axios.post(`${API_BASE_URL}/analyze-image`, formData, {
+                headers: { 'Content-Type': 'multipart/form-data' },
+            });
+            return response.data;
+        } catch (error) {
+            console.error("Analysis Error:", error);
+            throw error;
+        }
+    },
+
+    verifyUpi: async (upiId) => {
+        try {
+            const response = await axios.post(`${API_BASE_URL}/verify-upi`, { upi_id: upiId });
+            return response.data;
+        } catch (error) {
+            console.error("Verification Error:", error);
+            throw error;
+        }
     }
 };

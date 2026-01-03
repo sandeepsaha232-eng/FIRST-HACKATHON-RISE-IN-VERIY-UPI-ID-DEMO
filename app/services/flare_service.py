@@ -133,12 +133,65 @@ class FlareService:
         return new_proof
 
    
+    async def attest_upi_verification(self, validation_data: dict):
+        """
+        Simulates submitting the UPI validation result to the Flare Data Connector (FDC)
+        using the Web2Json Attestation Type.
+        """
+        if not validation_data.get("is_active"):
+            print("❌ FDC: Attestation Failed - Invalid VPA (Pre-check)")
+            return {
+                "attestation_status": "FAILED",
+                "proof": None
+            }
+
+        # 1. Prepare Web2Json Attestation Request
+        # In a real app, this is ABI encoded data.
+        # {
+        #   "url": "https://api.gateway.com/validate?vpa=...",
+        #   "type": "Web2Json",
+        #   "path": "$.is_active",
+        #   "expectedValue": true
+        # }
+        print(f"🔗 Flare: Preparing Web2Json Attestation Request for {validation_data.get('upi_id')}...")
+        
+        attestation_request = {
+            "attestationType": "0xWEB2JSON", # Mock Type
+            "sourceId": "0xWEB2", 
+            "requestBody": {
+                "url": f"https://api.mock-gateway.com/validate?vpa={validation_data.get('upi_id')}",
+                "target_key": "is_active",
+                "expected_value": "true"
+            }
+        }
+        
+        # 2. Submit to FDC Hub (Mock)
+        # tx = fdc_hub.functions.requestAttestation(encode(attestation_request)).transact(...)
+        print(f"📡 FDC Hub: Submitting Request -> {json.dumps(attestation_request)}")
+        
+        await asyncio.sleep(2) # Simulate Consensus
+        
+        # 3. Receive Merkle Proof
+        proof_hash = self.w3.keccak(text=f"{validation_data['upi_id']}:{validation_data['registered_name']}").hex()
+        
+        print(f"✅ FDC: Proof Generated. Root: {proof_hash}")
+        
+        return {
+            "attestation_status": "VERIFIED",
+            "proof": proof_hash,
+            "attestation_round": 15420,
+            "data_availability_layer": "https://da-layer.flare.network/proofs/...",
+            "attestation_type": "Web2Json"
+        }
+
     def get_crypto_price(self, symbol: str) -> float:
         return 3000.0
 
 flare_service = FlareService()
 
+
 # -------------------------------------------------------------------------
+
 # TRUST ORACLE EXTENSION
 # -------------------------------------------------------------------------
 
